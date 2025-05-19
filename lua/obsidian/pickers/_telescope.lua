@@ -131,6 +131,67 @@ local function attach_picker_mappings(map, opts)
   end
 end
 
+---TODO using ripgrep to search on multiple lines (rg -U "aliases:\n  - Some") and ripgrep --files,
+local create_ripgrep_picker = function(self, prompt_title, opts)
+  local pickers = require "telescope.pickers"
+  local finders = require "telescope.finders"
+  local config = require("telescope.config").values
+  local actions = require "telescope.actions"
+  local make_entry = require('telescope.make_entry')
+
+  local picker_opts = {
+    prompt_title = prompt_title,
+    attach_mappings = function(prompt_bufnr, map)
+      -- actions.select_default:replace(function()
+      --   local selection = get_entry(prompt_bufnr, false)
+      --
+      --   if not selection or not selection.absolute_path then
+      --     return
+      --   end
+      --
+      --   vim.schedule(function()
+      --     self.client:open_note(selection.absolute_path)
+      --   end)
+      -- end)
+
+      attach_picker_mappings(map, {
+        entry_key = "absolute_path",
+        callback = opts.callback,
+        query_mappings = opts.query_mappings,
+        selection_mappings = opts.selection_mappings,
+      })
+      return true
+    end,
+  }
+
+  return pickers.new(picker_opts, {
+    cwd = opts.dir,
+    finder = finders.new_async_job {
+      entry_maker = function(entry)
+        return {
+          value = entry,
+          display = entry,
+          ordinal = entry,
+        }
+      end,
+      cwd = opts.dir.filename,
+      command_generator = function(prompt)
+        if not prompt or prompt == "" then
+          return nil -- No command when prompt is empty
+        end
+        -- local command = "rg"
+        -- return { command, "-U 'aliases:\n  - " .. prompt .. "'" } -- not working
+        -- return { command, "-U 'aliases'" } -- not working
+        -- return { "ls" } -- working
+        return { "rg", prompt }
+      end,
+    },
+    sorter = config.generic_sorter(opts),
+  })
+end
+
+
+---you can use search both of note names and their aliases.
 ---Creates custom picker to search the notes using obsidian.cache.NoteCache
 ---@param self obsidian.pickers.TelescopePicker
 ---@param prompt_title string
@@ -190,7 +251,7 @@ local create_cache_picker = function(self, prompt_title, opts)
         }
       end,
     },
-    sorter = config.generic_sorter(),
+    sorter = config.generic_sorter(opts),
   })
 end
 
@@ -205,7 +266,8 @@ TelescopePicker.find_files = function(self, opts)
   }
 
   if opts.use_cache then
-    create_cache_picker(self, prompt_title, opts):find()
+    create_ripgrep_picker(self, prompt_title, opts):find()
+    -- create_cache_picker(self, prompt_title, opts):find()
   else
     telescope.find_files {
       prompt_title = prompt_title,
@@ -309,7 +371,7 @@ TelescopePicker.pick = function(self, values, opts)
         local picker_conf = conf.pickers[picker_name]
         if picker_conf and picker_conf.theme then
           picker_opts =
-            vim.tbl_extend("force", picker_opts, require("telescope.themes")["get_" .. picker_conf.theme] {})
+              vim.tbl_extend("force", picker_opts, require("telescope.themes")["get_" .. picker_conf.theme] {})
           break
         end
       end
@@ -319,42 +381,42 @@ TelescopePicker.pick = function(self, values, opts)
   local make_entry_from_string = make_entry.gen_from_string(picker_opts)
 
   pickers
-    .new(picker_opts, {
-      prompt_title = prompt_title,
-      finder = finders.new_table {
-        results = values,
-        entry_maker = function(v)
-          if type(v) == "string" then
-            return make_entry_from_string(v)
-          else
-            local ordinal = v.ordinal
-            if ordinal == nil then
-              ordinal = ""
-              if type(v.display) == "string" then
-                ordinal = ordinal .. v.display
+      .new(picker_opts, {
+        prompt_title = prompt_title,
+        finder = finders.new_table {
+          results = values,
+          entry_maker = function(v)
+            if type(v) == "string" then
+              return make_entry_from_string(v)
+            else
+              local ordinal = v.ordinal
+              if ordinal == nil then
+                ordinal = ""
+                if type(v.display) == "string" then
+                  ordinal = ordinal .. v.display
+                end
+                if v.filename ~= nil then
+                  ordinal = ordinal .. " " .. v.filename
+                end
               end
-              if v.filename ~= nil then
-                ordinal = ordinal .. " " .. v.filename
-              end
-            end
 
-            return {
-              value = v.value,
-              display = displayer,
-              ordinal = ordinal,
-              filename = v.filename,
-              valid = v.valid,
-              lnum = v.lnum,
-              col = v.col,
-              raw = v,
-            }
-          end
-        end,
-      },
-      sorter = conf.values.generic_sorter(picker_opts),
-      previewer = previewer,
-    })
-    :find()
+              return {
+                value = v.value,
+                display = displayer,
+                ordinal = ordinal,
+                filename = v.filename,
+                valid = v.valid,
+                lnum = v.lnum,
+                col = v.col,
+                raw = v,
+              }
+            end
+          end,
+        },
+        sorter = conf.values.generic_sorter(picker_opts),
+        previewer = previewer,
+      })
+      :find()
 end
 
 return TelescopePicker
