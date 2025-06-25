@@ -89,7 +89,7 @@ obsidian.setup = function(opts)
   end
 
   if opts.statusline.enabled then
-    client:statusline()
+    require("obsidian.statusline").start(client)
   end
 
   -- Register completion sources, providers
@@ -134,14 +134,14 @@ obsidian.setup = function(opts)
       if not client.current_workspace.locked and workspace ~= client.current_workspace then
         log.debug("Switching to workspace '%s' @ '%s'", workspace.name, workspace.path)
         client:set_workspace(workspace)
-        client:update_ui(ev.buf)
+        require("obsidian.ui").update(ev.buf)
       end
 
       -- Register keymap.
       vim.keymap.set("n", "<CR>", require("obsidian.builtin").smart_action, {
         expr = true,
-        buffer = ev.buf,
-        noremap = false,
+        buffer = true,
+        desc = "Obsidian Smart Action",
       })
 
       -- Inject completion sources, providers to their plugin configurations

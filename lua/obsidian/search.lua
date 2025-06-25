@@ -28,7 +28,7 @@ M.Patterns = {
   -- Tags
   TagCharsOptional = "[A-Za-z0-9_/-]*",
   TagCharsRequired = "[A-Za-z]+[A-Za-z0-9_/-]*[A-Za-z0-9]+", -- assumes tag is at least 2 chars
-  Tag = "%f[%S]#%f[%a][A-Za-z][A-Za-z0-9_-]*[A-Za-z0-9]", -- reference: https://help.obsidian.md/tags
+  Tag = "#[A-Za-z]+[A-Za-z0-9_/-]*[A-Za-z0-9]+",
 
   -- Miscellaneous
   Highlight = "==[^=]+==", -- ==text==
@@ -271,9 +271,9 @@ end
 ---@field ignore_case boolean|?
 ---@field smart_case boolean|?
 ---@field exclude string[]|? paths to exclude
----@field max_count_per_file integer|?
+---@field max_count_per_file integer|? Limit the number of matching lines per file searched to max_count_per_file.
 ---@field escape_path boolean|?
----@field include_non_markdown boolean|?
+---@field include_non_markdown boolean|? search for .*? If false, searches for .md
 
 local SearchOpts = {}
 M.SearchOpts = SearchOpts
