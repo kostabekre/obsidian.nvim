@@ -3,6 +3,7 @@ local log = require "obsidian.log"
 local util = require "obsidian.util"
 local iter, string, table = vim.iter, string, table
 local Path = require "obsidian.path"
+local search = require "obsidian.search"
 
 ---@param dir string | obsidian.Path
 ---@return Iter
@@ -112,6 +113,9 @@ end
 ---@param states table|nil Optional table containing checkbox states (e.g., {" ", "x"}).
 ---@param line_num number|nil Optional line number to toggle the checkbox on. Defaults to the current line.
 M.toggle_checkbox = function(states, line_num)
+  if not util.in_node { "list", "paragraph" } or util.in_node "block_quote" then
+    return
+  end
   line_num = line_num or unpack(vim.api.nvim_win_get_cursor(0))
   local line = vim.api.nvim_buf_get_lines(0, line_num - 1, line_num, false)[1]
 
@@ -125,16 +129,19 @@ M.toggle_checkbox = function(states, line_num)
         break
       end
     end
-  else
+  elseif Obsidian.opts.checkbox.create_new then
     local unordered_list_pattern = "^(%s*)[-*+] (.*)"
     if string.match(line, unordered_list_pattern) then
       line = string.gsub(line, unordered_list_pattern, "%1- [ ] %2")
     else
       line = string.gsub(line, "^(%s*)", "%1- [ ] ")
     end
+  else
+    goto out
   end
 
   vim.api.nvim_buf_set_lines(0, line_num - 1, line_num, true, { line })
+  ::out::
 end
 
 ---@return [number, number, number, number] tuple containing { buf, win, row, col }
@@ -188,69 +195,29 @@ M.format_link = function(note, opts)
   end
 end
 
----Determines if cursor is currently inside markdown link.
+---Return the full link under cursror
 ---
----@param line string|nil - line to check or current line if nil
----@param col  integer|nil - column to check or current column if nil (1-indexed)
----@param include_naked_urls boolean|?
----@param include_file_urls boolean|?
----@param include_block_ids boolean|?
----@return integer|nil, integer|nil, obsidian.search.RefTypes|? - start and end column of link (1-indexed)
-M.cursor_on_markdown_link = function(line, col, include_naked_urls, include_file_urls, include_block_ids)
-  local search = require "obsidian.search"
-  local current_line = line or vim.api.nvim_get_current_line()
+---@return string? link
+---@return obsidian.search.RefTypes? link_type
+M.cursor_link = function()
+  local line = vim.api.nvim_get_current_line()
   local _, cur_col = unpack(vim.api.nvim_win_get_cursor(0))
-  cur_col = col or cur_col + 1 -- nvim_win_get_cursor returns 0-indexed column
+  cur_col = cur_col + 1 -- 0-indexed column to 1-indexed lua string position
 
-  for match in
-    iter(search.find_refs(current_line, {
-      include_naked_urls = include_naked_urls,
-      include_file_urls = include_file_urls,
-      include_block_ids = include_block_ids,
-    }))
-  do
-    local open, close, m_type = unpack(match)
-    if open <= cur_col and cur_col <= close then
-      return open, close, m_type
-    end
+  local refs = search.find_refs(line, { include_naked_urls = true, include_file_urls = true, include_block_ids = true })
+
+  local match = iter(refs):find(function(match)
+    local open, close = unpack(match)
+    return cur_col >= open and cur_col <= close
+  end)
+  if match then
+    return line:sub(match[1], match[2]), match[3]
   end
-
-  return nil
-end
-
---- Get the link location and name of the link under the cursor, if there is one.
----
----@param opts { line: string|?, col: integer|?, include_naked_urls: boolean|?, include_file_urls: boolean|?, include_block_ids: boolean|? }|?
----
----@return string|?, string|?, obsidian.search.RefTypes|?
-M.parse_cursor_link = function(opts)
-  opts = opts or {}
-
-  local current_line = opts.line and opts.line or vim.api.nvim_get_current_line()
-  local open, close, link_type = M.cursor_on_markdown_link(
-    current_line,
-    opts.col,
-    opts.include_naked_urls,
-    opts.include_file_urls,
-    opts.include_block_ids
-  )
-  if open == nil or close == nil then
-    return
-  end
-
-  local link = current_line:sub(open, close)
-  return util.parse_link(link, {
-    link_type = link_type,
-    include_naked_urls = opts.include_naked_urls,
-    include_file_urls = opts.include_file_urls,
-    include_block_ids = opts.include_block_ids,
-  })
 end
 
 ---Get the tag under the cursor, if there is one.
 ---@return string?
 M.cursor_tag = function()
-  local search = require "obsidian.search"
   local current_line = vim.api.nvim_get_current_line()
   local _, cur_col = unpack(vim.api.nvim_win_get_cursor(0))
   cur_col = cur_col + 1 -- nvim_win_get_cursor returns 0-indexed column
@@ -647,13 +614,52 @@ end
 M.get_all_notes_from_vault = function(path)
   local files = {}
 
-  for name, t in vim.fs.dir(path, { depth = 10 }) do
-    if t == "file" and vim.endswith(name, ".md") then
-      local full_path = vim.fs.joinpath(path, name)
-      files[#files + 1] = full_path
+  local cmd
+  local find_command
+
+  -- checking for executable which support .ignore or .gitignore
+  if 1 == vim.fn.executable "rg" then
+    find_command = { "rg", "--files", "--color", "never", "--glob", "'*.md'", path }
+    cmd = "rg"
+  elseif 1 == vim.fn.executable "fd" then
+    find_command = { "fd", "--type", "f", "--color", "never", "--extension", "md", "--base-directory", path }
+    cmd = "fd"
+  elseif 1 == vim.fn.executable "fdfind" then
+    find_command = { "fdfind", "--type", "f", "--color", "never", "--extension", "md", "--base-directory", path }
+    cmd = "fdfind"
+  end
+
+  if cmd then
+    local handle = io.popen(table.concat(find_command, " "))
+
+    if not handle then
+      log.error("couldn't execute cmd " .. cmd)
+      return {}
+    end
+
+    for file in handle:lines() do
+      files[#files + 1] = file
+    end
+  else
+    -- If we couldn't find one of the executable, fallback to default implemendation
+    -- which doesn't respect .ignore or .gitignore.
+    for name, t in vim.fs.dir(path, { depth = 10 }) do
+      if t == "file" and vim.endswith(name, ".md") then
+        local full_path = vim.fs.joinpath(path, name)
+        files[#files + 1] = full_path
+      end
     end
   end
+
   return files
+end
+
+---Use greedy search to get the folder of the file.
+---@param file_path string
+---@param sep string
+---@return string
+local get_directory_path = function(file_path, sep)
+  return file_path:match("(.*" .. sep .. ")")
 end
 
 ---Gets all subfolders from the vault.
@@ -662,13 +668,90 @@ end
 M.get_sub_dirs_from_vault = function(path)
   local subdirs = {}
 
-  for name, t in vim.fs.dir(path, { depth = 10 }) do
-    if t == "directory" then
-      local full_path = vim.fs.joinpath(path, name)
-      subdirs[#subdirs + 1] = full_path
+  local cmd
+  local find_command
+
+  -- checking for executable which support .ignore or .gitignore
+  if 1 == vim.fn.executable "fd" then
+    find_command = { "fd", "--type", "d", "--color", "never", "--base-directory", path }
+    cmd = "fd"
+  elseif 1 == vim.fn.executable "fdfind" then
+    find_command = { "fdfind", "--type", "f", "--color", "never", "--base-directory", path }
+    cmd = "fdfind"
+  elseif 1 == vim.fn.executable "rg" then
+    -- rg doesn't support searching folders, so we will filter output manually.
+    -- Unfortunatly, this won't return folders which are empty.
+    find_command = { "rg", "--files", "--color", "never", "--glob", "'*.md'", path }
+    cmd = "rg"
+  end
+
+  if cmd then
+    local handle = io.popen(table.concat(find_command, " "))
+
+    if not handle then
+      log.error("couldn't execute cmd " .. cmd)
+      return {}
+    end
+
+    if cmd == "rg" then
+      local path_separator = "/"
+
+      local sysname = M.get_os()
+
+      if sysname == M.OSType.Windows then
+        path_separator = "\\"
+      end
+
+      for file in handle:lines() do
+        local subdir = get_directory_path(file, path_separator)
+
+        if not vim.tbl_contains(subdirs, subdir) then
+          subdirs[#subdirs + 1] = subdir
+        end
+      end
+    else
+      for subdir in handle:lines() do
+        subdirs[#subdirs + 1] = subdir
+      end
+    end
+  else
+    -- the user doesn't have tools which support .gitignore or .ignore,
+    -- fallback to getting all folders
+    for name, t in vim.fs.dir(path, { depth = 10 }) do
+      if t == "directory" then
+        local full_path = vim.fs.joinpath(path, name)
+        subdirs[#subdirs + 1] = full_path
+      end
     end
   end
+
   return subdirs
+end
+
+---Cross-platform check if the pid exists.
+---@param pid string
+---@return boolean
+M.check_pid_exists = function(pid)
+  local system = M.get_os()
+
+  if system == M.OSType.Windows then
+    local cmd = string.format('tasklist /FI "PID eq %d" /NH', pid)
+    local pipe = io.popen(cmd)
+    assert(pipe)
+    local output = pipe:read()
+    pipe:close()
+
+    return output:match(pid) ~= nil
+  else
+    local cmd = "kill -0 " .. pid
+    local ok = os.execute(cmd)
+
+    if ok then
+      return true
+    else
+      return false
+    end
+  end
 end
 
 --- Resolve a basename to full path inside the vault.
@@ -677,6 +760,156 @@ end
 ---@return string
 M.resolve_image_path = function(src)
   return vim.fs.joinpath(tostring(Obsidian.dir), Obsidian.opts.attachments.img_folder, src)
+end
+
+--- Follow a link. If the link argument is `nil` we attempt to follow a link under the cursor.
+---
+---@param link string
+---@param opts { open_strategy: obsidian.config.OpenStrategy|? }|?
+M.follow_link = function(link, opts)
+  opts = opts and opts or {}
+  local Note = require "obsidian.note"
+
+  search.resolve_link_async(link, function(results)
+    if #results == 0 then
+      return
+    end
+
+    ---@param res obsidian.ResolveLinkResult
+    local function follow_link(res)
+      if res.url ~= nil then
+        Obsidian.opts.follow_url_func(res.url)
+        return
+      end
+
+      if util.is_img(res.location) then
+        local path = Obsidian.dir / res.location
+        Obsidian.opts.follow_img_func(tostring(path))
+        return
+      end
+
+      if res.note ~= nil then
+        -- Go to resolved note.
+        return res.note:open { line = res.line, col = res.col, open_strategy = opts.open_strategy }
+      end
+
+      if res.link_type == search.RefTypes.Wiki or res.link_type == search.RefTypes.WikiWithAlias then
+        -- Prompt to create a new note.
+        if M.confirm("Create new note '" .. res.location .. "'?") then
+          -- Create a new note.
+          ---@type string|?, string[]
+          local id, aliases
+          if res.name == res.location then
+            aliases = {}
+          else
+            aliases = { res.name }
+            id = res.location
+          end
+
+          local note = Note.create { title = res.name, id = id, aliases = aliases }
+          return note:open {
+            open_strategy = opts.open_strategy,
+            callback = function(bufnr)
+              note:write_to_buffer { bufnr = bufnr }
+            end,
+          }
+        else
+          log.warn "Aborted"
+          return
+        end
+      end
+
+      return log.err("Failed to resolve file '" .. res.location .. "'")
+    end
+
+    if #results == 1 then
+      return vim.schedule(function()
+        follow_link(results[1])
+      end)
+    else
+      return vim.schedule(function()
+        local picker = Obsidian.picker
+        if not picker then
+          log.err("Found multiple matches to '%s', but no picker is configured", link)
+          return
+        end
+
+        ---@type obsidian.PickerEntry[]
+        local entries = {}
+        for _, res in ipairs(results) do
+          local icon, icon_hl
+          if res.url ~= nil then
+            icon, icon_hl = M.get_icon(res.url)
+          end
+          table.insert(entries, {
+            value = res,
+            display = res.name,
+            filename = res.path and tostring(res.path) or nil,
+            icon = icon,
+            icon_hl = icon_hl,
+          })
+        end
+
+        picker:pick(entries, {
+          prompt_title = "Follow link",
+          callback = function(res)
+            follow_link(res)
+          end,
+        })
+      end)
+    end
+  end)
+end
+--------------------------
+---- Mapping functions ---
+--------------------------
+
+---@param direction "next" | "prev"
+M.nav_link = function(direction)
+  vim.validate("direction", direction, "string", false, "nav_link must be called with a direction")
+  local cursor_line, cursor_col = unpack(vim.api.nvim_win_get_cursor(0))
+  local Note = require "obsidian.note"
+
+  search.find_links(Note.from_buffer(0), {}, function(matches)
+    if direction == "next" then
+      for i = 1, #matches do
+        local match = matches[i]
+        if (match.line > cursor_line) or (cursor_line == match.line and cursor_col < match.start) then
+          return vim.api.nvim_win_set_cursor(0, { match.line, match.start })
+        end
+      end
+    end
+
+    if direction == "prev" then
+      for i = #matches, 1, -1 do
+        local match = matches[i]
+        if (match.line < cursor_line) or (cursor_line == match.line and cursor_col > match.start) then
+          return vim.api.nvim_win_set_cursor(0, { match.line, match.start })
+        end
+      end
+    end
+  end)
+end
+
+M.smart_action = function()
+  local legacy = Obsidian.opts.legacy_commands
+  -- follow link if possible
+  if M.cursor_link() then
+    return legacy and "<cmd>ObsidianFollowLink<cr>" or "<cmd>Obsidian follow_link<cr>"
+  end
+
+  -- show notes with tag if possible
+  if M.cursor_tag() then
+    return legacy and "<cmd>ObsidianTags<cr>" or "<cmd>Obsidian tags<cr>"
+  end
+
+  if M.cursor_heading() then
+    return "za"
+  end
+
+  -- toggle task if possible
+  -- cycles through your custom UI checkboxes, default: [ ] [~] [>] [x]
+  return legacy and "<cmd>ObsidianToggleCheckbox<cr>" or "<cmd>Obsidian toggle_checkbox<cr>"
 end
 
 return M

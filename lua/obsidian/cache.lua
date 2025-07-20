@@ -196,12 +196,39 @@ end
 local enable_filewatch = function()
   local workspace_path = Obsidian.dir.filename
 
+  -- We need a lock file to check if a neovim instance is open in the workspace.
+  -- This prevents creating more filewatches in the same workspace which can lead to bugs and can decrease performaance.
+  local lock_name = table.concat { ".", Obsidian.dir.stem, ".lock" }
+  local lock_file_path = vim.fs.joinpath(workspace_path, lock_name)
+
+  if uv.fs_stat(lock_file_path) then
+    local lock_file = io.open(lock_file_path, "r")
+
+    assert(lock_file)
+
+    local pid = lock_file:read()
+    lock_file:close()
+
+    if api.check_pid_exists(pid) then
+      return
+    end
+  end
+
+  local lock_file_handler = io.open(lock_file_path, "w")
+
+  assert(lock_file_handler)
+
+  local current_nvim_pid = uv.os_getpid()
+  lock_file_handler:write(current_nvim_pid)
+  lock_file_handler:close()
+
   local filewatch = require "obsidian.filewatch"
   filewatch.watch(workspace_path, create_on_file_change_callback())
 
   vim.api.nvim_create_autocmd({ "QuitPre", "ExitPre" }, {
     callback = function()
       filewatch.release_resources()
+      os.remove(lock_file_path)
     end,
   })
 end
