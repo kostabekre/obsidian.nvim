@@ -7,7 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
-- Fixed types in `opts.workspaces[*].overrides` to all be optional.
+### Fixed
+
+- Fixed incorrect call signature for `options.callbacks.post_set_workspace`
+- Fixed incorrect fallback for `resolve_note`.
+
+## [v3.13.0](https://github.com/obsidian-nvim/obsidian.nvim/releases/tag/v3.13.0) - 2025-07-28
 
 ### Added
 
@@ -26,6 +31,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added `check_buffers` option to `Note.write` and `Note.save` for automatically reloading buffers with `checktime` after writing them to disk
 - Added footer options.
 - Added default mappings: `]o` and `[o`, for navigating links in note.
+- Support pasting image to sub directory in current directory.
+- Reimplement `Obsidian rename` with `vim.lsp`.
+- Support parsing `title` frontmatter property.
 
 ### Changed
 
@@ -62,6 +70,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Moved `client:find_notes_async` -> `search.find_notes_async`
 - `Obsidian toggle_checkbox` will only be triggered in correct context, in `paragraph` and `list` ts nodes.
 - `opts.checkbox.create_new` to configure whether insert new checkbox
+- Don't depend on plenary anymore!
 
 ### Fixed
 
@@ -77,6 +86,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Fixed tag completion for blink.cmp and improved frontmatter tag handling
 - Fixed to allow numbers in note IDs.
 - Fixed ignore subdirectories specified in `daily_notes.date_format`
+- Fixed not make sure template folder exists.
+- Refactored workspace module for a better api.
+- Fixed types in `opts.workspaces[*].overrides` to all be optional.
 
 ### Changed
 - In telescope an option was added to search notes by aliases.
@@ -345,7 +357,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 There's a lot of new features and improvements here that I'm really excited about 🥳 They've improved my workflow a ton and I hope they do for you too. To highlight the 3 biggest additions:
 
 1. 🔗 Full support for header anchor links and block links! That means both for following links and completion of links. Various forms of anchor/block links are support. Here are a few examples:
-
    - Typical Obsidian-style wiki links, e.g. `[[My note#Heading 1]]`, `[[My note#Heading 1#Sub heading]]`, `[[My note#^block-123]]`.
    - Wiki links with a label, e.g. `[[my-note#heading-1|Heading 1 in My Note]]`.
    - Markdown links, e.g. `[Heading 1 in My Note](my-note.md#heading-1)`.
