@@ -1244,7 +1244,7 @@ Note.open = function(note, opts)
     if opts.callback then
       opts.callback(bufnr)
     end
-    note:update_frontmatter(bufnr)
+    --note:update_frontmatter(bufnr)
   end
 
   if opts.sync then
