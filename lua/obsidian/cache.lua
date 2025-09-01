@@ -1,9 +1,10 @@
-local async = require "plenary.async"
+local async = require "obsidian.async"
 local Note = require "obsidian.note"
 local log = require "obsidian.log"
 local EventTypes = require("obsidian.filewatch").EventTypes
 local uv = vim.uv
 local api = require "obsidian.api"
+local util = require "obsidian.util"
 
 ---This table allows you to find the notes in your vault more quickly.
 ---It scans your vault and saves the founded metadata to the file specified in your CacheOpts (by default it's ".cache.json").
@@ -71,17 +72,21 @@ local create_on_file_change_callback = function()
         local relative_path = file.absolute_path:gsub(workspace_path .. "/", "")
 
         ---@param note obsidian.Note|?
-        local update_cache_dictionary = function(note)
-          if note then
-            ---@type obsidian.cache.CacheNote
-            local founded_cache = {
-              absolute_path = file.absolute_path,
-              aliases = note.aliases,
-              last_updated = file.stat.mtime.sec,
-              tags = note.tags,
-            }
+        local update_cache_dictionary = function(err, note)
+          if err then
+            log.err("an error occured when reading from a note. " .. err)
+          else
+            if note then -- check, because a note can be deleted. If deleted, the note variable is empty.
+              ---@type obsidian.cache.CacheNote
+              local founded_cache = {
+                absolute_path = file.absolute_path,
+                aliases = note.aliases,
+                last_updated = file.stat.mtime.sec,
+                tags = note.tags,
+              }
 
-            cache_notes[relative_path] = founded_cache
+              cache_notes[relative_path] = founded_cache
+            end
           end
 
           left = left - 1
@@ -198,8 +203,23 @@ local enable_filewatch = function()
 
   -- We need a lock file to check if a neovim instance is open in the workspace.
   -- This prevents creating more filewatches in the same workspace which can lead to bugs and can decrease performaance.
-  local lock_name = table.concat { ".", Obsidian.dir.stem, ".lock" }
-  local lock_file_path = vim.fs.joinpath(workspace_path, lock_name)
+  local lock_name = table.concat { Obsidian.dir.stem, ".lock" }
+  local obsidian_state_path = vim.fs.joinpath(vim.fn.stdpath "state", "obsidian/")
+
+  local stat_of_state_folder = uv.fs_stat(obsidian_state_path)
+
+  if not stat_of_state_folder then
+    ---@diagnostic disable-next-line: param-type-mismatch
+    local mode = assert(tonumber(755, 8))
+    local ok = uv.fs_mkdir(obsidian_state_path, mode)
+
+    if not ok then
+      log.err("Couldn't create folder at " .. obsidian_state_path)
+      return
+    end
+  end
+
+  local lock_file_path = vim.fs.joinpath(obsidian_state_path, lock_name)
 
   if uv.fs_stat(lock_file_path) then
     local lock_file = io.open(lock_file_path, "r")
@@ -214,13 +234,8 @@ local enable_filewatch = function()
     end
   end
 
-  local lock_file_handler = io.open(lock_file_path, "w")
-
-  assert(lock_file_handler)
-
   local current_nvim_pid = uv.os_getpid()
-  lock_file_handler:write(current_nvim_pid)
-  lock_file_handler:close()
+  util.write_file(lock_file_path, tostring(current_nvim_pid))
 
   local filewatch = require "obsidian.filewatch"
   filewatch.watch(workspace_path, create_on_file_change_callback())
@@ -265,7 +280,12 @@ local get_cache_notes_from_vault = function(callback)
     callback(created_note_caches)
   end
 
-  local on_note_parsed = function(note)
+  local on_note_parsed = function(err, note)
+    if err then
+      log.err("an error occured when reading from a note. " .. err)
+      return
+    end
+
     local absolute_path = note.path.filename
     local relative_path = absolute_path:gsub(workspace_path .. "/", "")
 
