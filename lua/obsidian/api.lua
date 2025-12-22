@@ -11,6 +11,12 @@ local attachment = require "obsidian.attachment"
 
 M.dir = require("obsidian.fs").dir
 
+M.subdirs = function(path)
+  for f in M.dir(path) do
+    print(f)
+  end
+end
+
 --- TODO: will not work if plugin is managed by nix
 ---
 ---@return obsidian.Path|?
