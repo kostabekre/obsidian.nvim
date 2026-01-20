@@ -44,6 +44,9 @@ checklua:
 test: $(MINITEST)
 	nvim --headless --noplugin -u ./scripts/minimal_init.lua -c "lua MiniTest.run()"
 
+test_file: $(MINITEST)
+	nvim --headless --noplugin -u ./scripts/minimal_init.lua -c "lua MiniTest.run_file('$(FILE)')"
+
 $(MINITEST):
 	mkdir -p deps
 	git clone --filter=blob:none https://github.com/echasnovski/mini.test $(MINITEST)
