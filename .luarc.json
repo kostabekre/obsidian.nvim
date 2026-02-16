@@ -3,6 +3,6 @@
   "diagnostics.libraryFiles": "Disable",
   "workspace.checkThirdParty": "Disable",
   "workspace.ignoreDir": ["completion/", "compat.lua"],
-  "workspace.library": ["$VIMRUNTIME/lua/", "./lua/", "${3rd}/luv/library"],
+  "workspace.library": ["$VIMRUNTIME/lua/", "./lua/", "${3rd}/luv/library", "./deps/mini.test/lua/"],
   "diagnostics.globals": ["vim", "MiniTest"]
 }
